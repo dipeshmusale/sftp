@@ -1,0 +1,51 @@
+import json
+# import required packages
+import paramiko
+import boto3
+import os
+
+def sftp_host_connection():
+     # Credentials for SFTP server
+    username,password = os.environ['username'],os.environ['password']
+    
+    # Host IP address and SSH port
+    host,port = '65.0.183.217',22
+    
+    transport = paramiko.Transport((host,port))
+    
+    transport.connect(None,username,password)
+    
+    sftp = paramiko.SFTPClient.from_transport(transport)
+    return sftp, transport
+    
+#DynamoDB file name and path extraction
+def table_filelist(tableName):
+    session = boto3.session.Session(region_name=os.environ['regionName'])
+    dynamodb_client = session.client('dynamodb') 
+    dynamodb = session.resource("dynamodb")      
+    table = dynamodb.Table(tableName)
+    response1 = table.scan()
+    return response1
+    
+
+def lambda_handler(event, context):
+    s3_conn = boto3.client('s3')
+    sftp, transport = sftp_host_connection()
+    tableName = os.environ['tableName']
+    response1 = table_filelist(tableName)
+    data = response1.get('Items')
+   
+    for i in range(len(data)):
+        dynamo_filename = response1['Items'][i]['filename']
+        path = response1['Items'][i]['filepath']
+        
+        file = dynamo_filename
+        remote_path = path + '/'  
+       
+       
+        with sftp.open(remote_path + file, "r") as f:
+            f.prefetch()
+            s3_conn.put_object(Body=f,Bucket=os.environ['bucketname'], Key='sftpbackup'+'/'+file)
+    # Close the connections
+    sftp.close()
+    transport.close()

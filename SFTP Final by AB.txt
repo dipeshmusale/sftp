@@ -1,0 +1,48 @@
+# import required packages
+import paramiko
+import boto3
+import os
+
+# Function to establish connection with SFTP server
+
+def sftp_host_connection():
+     # Credentials for SFTP server
+    username,password = os.environ['username'],os.environ['password']
+    #  Host IP address and SSH port
+    host = '43.205.237.75'
+    port = 22
+    transport = paramiko.Transport((host,port))
+    
+    transport.connect(None,username,password)
+    
+    sftp = paramiko.SFTPClient.from_transport(transport)
+    return sftp, transport
+    
+# Function to establish connection with DynamoDB and fetch table contents as a response 
+def table_filelist(tableName):
+    session = boto3.session.Session(region_name=os.environ['regionName'])
+    dynamodb = session.resource("dynamodb")      
+    table = dynamodb.Table(tableName)
+    response = table.scan()
+    return response
+    
+
+def lambda_handler(event, context):
+    
+    s3_conn = boto3.client('s3')
+    sftp, transport = sftp_host_connection()  # call SFTP connection function
+    tableName = os.environ['tableName']   # Extract DynamoDB tablename from environmental Variable
+    response = table_filelist(tableName)
+    data = response.get('Items')
+   
+    for i in range(len(data)):
+        filename = response['Items'][i]['filename']    #Extract file name and path from DynamoDB table
+        path = response['Items'][i]['path']
+        
+        # Fetch file from SFTP server and copy into S3 Bucket
+        with sftp.open(path + filename, "r") as f:
+            f.prefetch()
+            s3_conn.put_object(Body=f,Bucket=os.environ['bucketname'], Key='sftpbackup'+'/'+filename)
+    # Close the connections
+    sftp.close()
+    transport.close()
